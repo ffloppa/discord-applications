@@ -31,6 +31,24 @@ public class Database {
                 }
 
             } catch (SQLException e) {
+                log.error("=== ОСНОВНАЯ ОШИБКА JDBC ===");
+                log.error("Состояние SQL (SQLState): " + e.getSQLState());
+                log.error("Код ошибки: " + e.getErrorCode());
+                log.error("Сообщение: " + e.getMessage());
+
+                Throwable cause = e.getCause();
+                if (cause != null) {
+                    log.error("=== ВНУТРЕННЯЯ ПРИЧИНА СЕТИ ===");
+                    log.error("Тип: " + cause.getClass().getName());
+                    log.error("Сообщение: " + cause.getMessage());
+                }
+
+                SQLException nextEx = e.getNextException();
+                while (nextEx != null) {
+                    log.error("=== СЛЕДУЮЩЕЕ ИСКЛЮЧЕНИЕ В ЦЕПОЧКЕ ===");
+                    log.error("Сообщение: " + nextEx.getMessage());
+                    nextEx = nextEx.getNextException();
+                }
                 log.error("[DB] Connection Failed!" + "\n\n" + e.getMessage());
             }
             return null;
