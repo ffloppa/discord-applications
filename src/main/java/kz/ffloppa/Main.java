@@ -39,7 +39,7 @@ public class Main {
     public final static Button sendRequestButton = Button.primary("send-request", "Отправить запрос");
 
     static void main() {
-        GatewayDiscordClient client = DiscordClient.create("d")
+        GatewayDiscordClient client = DiscordClient.create(System.getenv("token"))
                 .gateway()
                 .withEventDispatcher(d -> d.on(ReadyEvent.class)
                         .doOnNext(readyEvent -> log.info("Ready: {}", readyEvent.getShardInfo())))
