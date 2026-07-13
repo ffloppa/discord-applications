@@ -10,7 +10,7 @@ import java.sql.*;
 public class Database {
     private static final Logger log = Loggers.getLogger(Database.class);
 
-    private static final String URL = Main.dotenv.get("postgresql_url");
+    private static final String URL = "jdbc:" + Main.dotenv.get("postgresql_url");
     private static final String USER = Main.dotenv.get("postgresql_user");
     private static final String PASSWORD = Main.dotenv.get("postgresql_password");
     private Statement statement;
@@ -36,7 +36,28 @@ public class Database {
             return null;
         }).subscribe(
                 result -> {},
-                error -> log.error("[DB] Connection Failed!" + "\n\n" + error.getMessage())
+                error -> {
+                    SQLException exception = (SQLException) error;
+                    log.error("=== ОСНОВНАЯ ОШИБКА JDBC ===");
+                    log.error("Состояние SQL (SQLState): " + exception.getSQLState());
+                    log.error("Код ошибки: " + exception.getErrorCode());
+                    log.error("Сообщение: " + exception.getMessage());
+
+                    Throwable cause = exception.getCause();
+                    if (cause != null) {
+                        log.error("=== ВНУТРЕННЯЯ ПРИЧИНА СЕТИ ===");
+                        log.error("Тип: " + cause.getClass().getName());
+                        log.error("Сообщение: " + cause.getMessage());
+                    }
+
+                    SQLException nextEx = exception.getNextException();
+                    while (nextEx != null) {
+                        log.error("=== СЛЕДУЮЩЕЕ ИСКЛЮЧЕНИЕ В ЦЕПОЧКЕ ===");
+                        log.error("Сообщение: " + nextEx.getMessage());
+                        nextEx = nextEx.getNextException();
+                    }
+                    log.error("[DB] Connection Failed!" + "\n\n" + exception.getMessage());
+                }
         );
     }
 
