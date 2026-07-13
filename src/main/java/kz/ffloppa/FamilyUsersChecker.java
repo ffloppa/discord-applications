@@ -3,16 +3,20 @@ package kz.ffloppa;
 import discord4j.common.util.Snowflake;
 import discord4j.core.GatewayDiscordClient;
 import discord4j.core.event.domain.guild.BanEvent;
+import discord4j.core.event.domain.interaction.ChatInputInteractionEvent;
 import discord4j.core.event.domain.interaction.ModalSubmitInteractionEvent;
 import discord4j.core.event.domain.interaction.SelectMenuInteractionEvent;
 import discord4j.core.object.component.ActionRow;
 import discord4j.core.object.component.SelectMenu;
 import discord4j.core.object.component.TextInput;
+import discord4j.core.object.entity.Guild;
+import discord4j.core.object.entity.Member;
 import discord4j.core.object.entity.channel.GuildMessageChannel;
 import discord4j.core.object.entity.channel.MessageChannel;
 import discord4j.core.spec.EmbedCreateSpec;
 import discord4j.core.spec.InteractionPresentModalSpec;
 import discord4j.core.spec.MessageCreateSpec;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 import reactor.util.Logger;
@@ -25,54 +29,23 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static kz.ffloppa.Main.*;
 
 public class FamilyUsersChecker {
-    private static final Logger log = Loggers.getLogger(Main.class);
     private final Database db = new Database();
-    private final HashMap<String,String> users = new HashMap<>();
+    private final HashMap<String, String> users = new HashMap<>();
     private final Collection<String> usersIdxToCheck = new ArrayList<>();
 
     FamilyUsersChecker(GatewayDiscordClient client) {
-        client.getGuildById(guildId)
-              .subscribe(guild ->
-                      guild.getMembers()
-                           .map(member -> {
-                               if(member.getDisplayName().contains("_") && isUserExists(client, member.getId().asString()))
-                                  return Objects.requireNonNull(users.put(member.getId().asString(), member.getDisplayName()));
-                               else
-                                  return usersIdxToCheck.add(member.getId().asString());
-                           })
-              );
-
-        client.getChannelById(managingChannelId)
-                .ofType(MessageChannel.class)
-                .subscribe(channel -> {
-                    StringBuilder buttonId = new StringBuilder("edit-nick-");
-                    for(String user : usersIdxToCheck)
-                        buttonId.append(user);
-                    for(String user : usersIdxToCheck) {
-                        List<SelectMenu.DefaultValue> optionsList = new ArrayList<>();
-                        for(String userIdx : usersIdxToCheck)
-                            optionsList.add(SelectMenu.DefaultValue.of(Snowflake.of(userIdx), SelectMenu.DefaultValue.Type.USER));
-                        SelectMenu selectMenu = SelectMenu.ofUser("menu-edit-nicks-users", optionsList);
-
-                        channel.createMessage(MessageCreateSpec.builder()
-                                .embeds(EmbedCreateSpec.builder().title("Кто из них кто?")
-                                        .addField(String.format("<@%s>", user), "???", true)
-                                        .build())
-                                .components(ActionRow.of(selectMenu))
-                                .build());
-                    }
-                });
 
         client.on(SelectMenuInteractionEvent.class, event -> {
             if (event.getCustomId().equals("menu-edit-nicks-users")) {
-
                 List<String> selectedValues = event.getValues();
                 String choice = selectedValues.getFirst();
+
                 TextInput nickInput = TextInput.small("nickname", "Кьо этость?")
-                        .placeholder(choice);
+                        .placeholder("Введите новый никнейм");
+
                 return event.presentModal(InteractionPresentModalSpec.builder()
                         .title("выставь ник дон")
-                        .customId("fill-user-nick")
+                        .customId("fill-user-nick-" + choice)
                         .addComponent(ActionRow.of(nickInput))
                         .build()
                 );
@@ -81,68 +54,112 @@ public class FamilyUsersChecker {
         }).subscribe();
 
         client.on(ModalSubmitInteractionEvent.class, event -> {
-            if (event.getCustomId().equals("fill-user-nick")) {
-                AtomicBoolean isAdmin = new AtomicBoolean();
-                event.getUser().asMember(guildId)
+            if (event.getCustomId().startsWith("fill-user-nick-")) {
+                return event.getUser().asMember(guildId)
                         .flatMap(member -> member.getRoles().any(role -> role.getId().equals(adminRoleId)))
-                        .subscribe(isAdmin::set);
-                if(isAdmin.get()) {
+                        .flatMap(isAdmin -> {
+                            if (isAdmin) {
+                                String user = event.getCustomId().replace("fill-user-nick-", "");
+                                String nick = "???";
 
-                    String nick = "???";
-                    String user = "???";
-                    for (TextInput input : event.getComponents(TextInput.class)) {
-                        if (input.getCustomId().equals("nickname")) {
-                            nick = input.getPlaceholder().orElse("???");
-                            user = input.getValue().orElse("???");
-                        }
-                    }
+                                for (TextInput input : event.getComponents(TextInput.class)) {
+                                    if (input.getCustomId().equals("nickname")) {
+                                        nick = input.getValue().orElse("???");
+                                    }
+                                }
 
-                    String finalUser = user;
-                    String finalNick = nick;
-                    return client.getGuildById(guildId)
-                            .flatMap(guild -> guild.getMemberById(Snowflake.of(finalUser)))
-                            .flatMap(member -> member.edit().name(finalNick))
-                            .flatMap(_ -> createDBRecordUser(client, finalUser,finalNick));
-                }
+                                String finalUser = user;
+                                String finalNick = nick;
+                                return client.getGuildById(guildId)
+                                        .flatMap(guild -> guild.getMemberById(Snowflake.of(finalUser)))
+                                        .flatMap(member -> member.edit().withNicknameOrNull(finalNick))
+                                        .flatMap(a -> createDBRecordUser(client, finalUser, finalNick));
+                            }
+                            return event.edit().withComponents(Collections.emptyList());
+                        });
             }
             return Mono.empty();
         }).subscribe();
 
-        client.on(BanEvent.class, event -> {
-            // Wipe out user from DB
-            return Mono.fromCallable(() -> {
-                        db.removeId(String.valueOf(event.getUser().getId()));
-                        return true;
-                    })
-                    .subscribeOn(Schedulers.boundedElastic())
-                    .then(client.getChannelById(debuggingChannelId)
+        client.on(BanEvent.class, event -> Mono.fromCallable(() -> {
+                    db.removeId(String.valueOf(event.getUser().getId()));
+                    return true;
+                })
+                .subscribeOn(Schedulers.boundedElastic())
+                .then(client.getChannelById(debuggingChannelId)
+                        .ofType(GuildMessageChannel.class)
+                        .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
+                                .title("удалил дон")
+                                .description(event.getUser().getId().asString())
+                                .build())
+                        ))
+                .onErrorResume(Exception.class, error -> {
+                    log.error(String.valueOf(error));
+                    return client.getChannelById(debuggingChannelId)
                             .ofType(GuildMessageChannel.class)
                             .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
-                                    .title("удалил дон")
-                                    .description(event.getUser().getId().asString())
+                                    .title("ашибка дон")
+                                    .description("иди проверь консоль дон")
                                     .build())
-                            ))
-                    .onErrorResume(Exception.class, error -> {
-                        log.error(String.valueOf(error));
-                        return client.getChannelById(debuggingChannelId)
-                                .ofType(GuildMessageChannel.class)
-                                .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
-                                        .title("ашибка дон")
-                                        .description("иди проверь консоль дон")
-                                        .build())
-                                );
-                    });
-        });
+                            );
+                })).subscribe();
+    }
+
+    public void callEditUsersMenu(GatewayDiscordClient client, ChatInputInteractionEvent event) {
+        client.getGuildById(guildId)
+                .flatMapMany(Guild::getMembers)
+                .flatMap(member -> {
+                    log.debug("CHECKING CHECKING CHECKING для пользователя: {}", member.getDisplayName());
+
+                    return member.getRoles()
+                            .any(role -> role.getId().asString().equals("1525814865413931038"))
+                            .map(isBot -> {
+                                String userId = member.getId().asString();
+                                String displayName = member.getDisplayName();
+
+                                if (displayName.contains("_") && isUserExists(client, userId) && isBot) {
+                                    log.debug("checked");
+                                    users.put(userId, displayName);
+                                } else if(!isBot) {
+                                    log.debug("checked");
+                                    usersIdxToCheck.add(userId);
+                                }
+                                return member;
+                            });
+                })
+                .then()
+                .then(
+                        client.getChannelById(managingChannelId)
+                                .ofType(MessageChannel.class)
+                                .flatMapMany(channel -> {
+                                            List<SelectMenu.DefaultValue> optionsList = new ArrayList<>(List.of());
+                                            Flux.fromIterable(usersIdxToCheck)
+                                                    .flatMap(user -> {
+                                                        optionsList.add(SelectMenu.DefaultValue.of(Snowflake.of(user), SelectMenu.DefaultValue.Type.USER));
+                                                        return Mono.empty();
+                                                    });
+                                            return event.reply()
+                                                    .withEmbeds(EmbedCreateSpec.builder().title("Кто? (на размышление дается 2 секунды)").build())
+                                                    .withComponents(ActionRow.of(SelectMenu.ofUser("menu-edit-nicks-users", optionsList)))
+                                                    .withEphemeral(true);
+                                        }
+                                )
+                                .then()
+                )
+                .subscribe(
+                        null,
+                        error -> log.error("Ошибка при обработке пользователей гильдии: ", error),
+                        () -> log.info("Проверка завершена! Сообщения успешно отправлены. Всего к проверке: {}", usersIdxToCheck.size())
+                );
     }
 
     public Mono<Void> createDBRecordUser(GatewayDiscordClient client, String user, String nick) {
         return Mono.defer(() -> {
             try {
-                db.setData(user,nick);
+                db.setData(user, nick);
                 return Mono.empty();
             } catch (SQLException e) {
                 log.error(e.getMessage());
-
                 return client.getChannelById(debuggingChannelId)
                         .ofType(GuildMessageChannel.class)
                         .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
@@ -150,26 +167,25 @@ public class FamilyUsersChecker {
                                 .description("иди проверь консоль дон")
                                 .build())
                         );
-            }}).then();
+            }
+        }).then();
     }
 
     public boolean isUserExists(GatewayDiscordClient client, String user) {
-        AtomicBoolean bool = new AtomicBoolean();
-        Mono.defer(() -> {
-            try {
-                bool.set(db.isUserIdExists(user));
-                return Mono.empty();
-            } catch (SQLException e) {
-                log.error(e.getMessage());
+        try {
+            return db.isUserIdExists(user);
+        } catch (SQLException e) {
+            log.error("Ошибка проверки юзера: " + e.getMessage());
+            return false;
+        }
+    }
 
-                return client.getChannelById(debuggingChannelId)
-                        .ofType(GuildMessageChannel.class)
-                        .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
-                                .title("ашибка дон")
-                                .description("иди проверь консоль дон")
-                                .build())
-                        );
-            }}).then();
-        return bool.get();
+    public String getUserNameFromDB(String id) {
+        try {
+            return db.getUserNickname(id);
+        } catch (SQLException e) {
+            log.error("Ошибка проверки юзера: " + e.getMessage());
+            return "err";
+        }
     }
 }

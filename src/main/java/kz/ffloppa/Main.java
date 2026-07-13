@@ -3,9 +3,14 @@ package kz.ffloppa;
 import discord4j.common.util.Snowflake;
 import discord4j.core.DiscordClient;
 import discord4j.core.GatewayDiscordClient;
+import discord4j.core.event.domain.interaction.ApplicationCommandInteractionEvent;
 import discord4j.core.event.domain.interaction.ButtonInteractionEvent;
+import discord4j.core.event.domain.interaction.ChatInputInteractionEvent;
 import discord4j.core.event.domain.interaction.ModalSubmitInteractionEvent;
 import discord4j.core.event.domain.lifecycle.ReadyEvent;
+import discord4j.core.object.command.ApplicationCommandInteractionOption;
+import discord4j.core.object.command.ApplicationCommandInteractionOptionValue;
+import discord4j.core.object.command.ApplicationCommandOption;
 import discord4j.core.object.component.ActionRow;
 import discord4j.core.object.component.Button;
 import discord4j.core.object.component.TextInput;
@@ -16,17 +21,22 @@ import discord4j.core.object.entity.channel.MessageChannel;
 import discord4j.core.spec.EmbedCreateSpec;
 import discord4j.core.spec.InteractionPresentModalSpec;
 import discord4j.core.spec.MessageCreateSpec;
+import discord4j.discordjson.json.ApplicationCommandOptionData;
+import discord4j.discordjson.json.ApplicationCommandRequest;
+import discord4j.gateway.intent.Intent;
+import discord4j.gateway.intent.IntentSet;
 import io.github.cdimascio.dotenv.Dotenv;
 import reactor.core.publisher.Mono;
 import reactor.util.Logger;
 import reactor.util.Loggers;
 
 import java.time.Instant;
+import java.time.LocalTime;
 import java.util.Collections;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class Main {
-    private static final Logger log = Loggers.getLogger(Main.class);
+    public static final Logger log = Loggers.getLogger(Main.class);
     public static final Dotenv dotenv = Dotenv.load();
     public final static Snowflake sendRequestChannelId = Snowflake.of(1525827353538854972L);
     public final static Snowflake adminRequestsChannelId = Snowflake.of(1525828328739700836L);
@@ -39,19 +49,76 @@ public class Main {
     public final static Snowflake verifiedRoleId = Snowflake.of(1525825482556309585L);
     public final static Button sendRequestButton = Button.primary("send-request", "Отправить запрос");
 
-    static void main() {
+    public static void main(String[] args) {
         GatewayDiscordClient client = DiscordClient.create(dotenv.get("token"))
                 .gateway()
+                .setEnabledIntents(IntentSet.of(
+                        Intent.GUILDS,
+                        Intent.GUILD_MEMBERS,
+                        Intent.GUILD_MESSAGES,
+                        Intent.MESSAGE_CONTENT
+                ))
                 .withEventDispatcher(d -> d.on(ReadyEvent.class)
-                        .doOnNext(readyEvent -> log.info("Ready: {}", readyEvent.getShardInfo())))
+                        .doOnNext(readyEvent -> {
+                            log.info("Ready: {}", readyEvent.getShardInfo());
+
+                            long applicationId = readyEvent.getClient().getRestClient().getApplicationId().block();
+
+                            readyEvent.getClient().getChannelById(debuggingChannelId).ofType(GuildMessageChannel.class).flatMap(channel -> channel.createMessage("здарова дон"));
+
+                            var searchCommand = ApplicationCommandRequest.builder()
+                                    .name("search")
+                                    .description("Понятно из названия")
+                                    .addOption(ApplicationCommandOptionData.builder().description("Сам пользователь").name("user").type(ApplicationCommandOption.Type.USER.getValue()).build())
+                                    .build();
+
+                            readyEvent.getClient().getRestClient().getApplicationService().createGuildApplicationCommand(applicationId, guildId.asLong(),searchCommand).subscribe();
+
+                            var editCommand = ApplicationCommandRequest.builder()
+                                    .name("edit_nicknames")
+                                    .description("Понятно из названия")
+                                    .build();
+
+                            readyEvent.getClient().getRestClient().getApplicationService().createGuildApplicationCommand(applicationId, guildId.asLong(),editCommand).subscribe();
+                        }))
                 .login()
                 .doOnError(e -> log.error("Failed to authenticate with Discord", e))
-                .doOnSuccess(gateway -> gateway.getChannelById(debuggingChannelId).ofType(MessageChannel.class).subscribe(channel -> channel.createMessage("здарова дон")))
+                .doOnSuccess(gateway -> gateway.getChannelById(debuggingChannelId).ofType(MessageChannel.class).flatMap(channel -> channel.createMessage(LocalTime.now() + ", здарова дон")))
                 .block();
 
         assert client != null;
+        client.onDisconnect()
+                .flatMap(a -> client.getChannelById(debuggingChannelId)
+                        .ofType(GuildMessageChannel.class)
+                        .flatMap(channel -> channel.createMessage("все дон я пошел"))
+                )
+                .subscribe(
+                        null,
+                        err -> log.error("Не удалось отправить прощальное сообщение", err),
+                        () -> log.info("Бот успешно отключился от шлюза.")
+                );
 
         FamilyUsersChecker usersChecker = new FamilyUsersChecker(client);
+
+        client.on(ChatInputInteractionEvent.class, event -> {
+            if (event.getCommandName().equals("search")) {
+                Mono<User> targetUserMono = event.getOptionAsUser("user");
+                return targetUserMono.flatMap(user -> {
+                    String targetUserId = user.getId().asString();
+
+                    return event.reply(String.format("<@%s> - **%s**", targetUserId, usersChecker.getUserNameFromDB(targetUserId))).withEphemeral(true);
+                });
+            }
+            if (event.getCommandName().equals("edit_nicknames")) {
+                Mono<User> targetUserMono = event.getOptionAsUser("user");
+                return targetUserMono.flatMap(user -> {
+                    usersChecker.callEditUsersMenu(client,event);
+                    return Mono.empty();
+                });
+            }
+
+            return Mono.empty();
+        }).subscribe();
 
         client.getChannelById(sendRequestChannelId)
                 .ofType(MessageChannel.class)
@@ -76,7 +143,7 @@ public class Main {
                                 })
                 )
                 .subscribe(
-                        _ -> log.info("Welcome message has been sent"),
+                        a -> log.info("Welcome message has been sent"),
                         err -> client.getChannelById(debuggingChannelId)
                                 .ofType(GuildMessageChannel.class)
                                 .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
@@ -149,7 +216,7 @@ public class Main {
                             .flatMap(guild -> guild.getMemberById(Snowflake.of(userId)))
                             .flatMap(member -> member.edit().name(nickName))
                             .flatMap(member -> member.addRole(verifiedRoleId))
-                            .flatMap(_ -> usersChecker.createDBRecordUser(client,userId,nickName))
+                            .flatMap(a -> usersChecker.createDBRecordUser(client,userId,nickName))
                             .then(event.deferEdit())
                             .then(Mono.justOrEmpty(event.getInteraction().getMessage())
                                     .flatMap(msg -> msg.edit().withComponents(Collections.emptyList()))
@@ -200,10 +267,7 @@ public class Main {
             return Mono.empty();
         }).subscribe();
 
-        client.onDisconnect().subscribe(_ -> client.getChannelById(debuggingChannelId)
-                .ofType(GuildMessageChannel.class)
-                .subscribe(channel -> channel.createMessage("все дон я пошел"))
-        );
+        client.onDisconnect().block();
     }
 }
 

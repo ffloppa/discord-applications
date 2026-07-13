@@ -17,70 +17,22 @@ public class Database {
     private Connection connection;
 
     Database() {
-        Mono.fromSupplier(() -> {
-            try (Connection connection1 = DriverManager.getConnection(URL, USER, PASSWORD)) {
-                statement = connection1.createStatement();
-                connection = connection1;
-                log.debug("[DB] Successfully connected!");
-
-                String query = "SELECT version();";
-                try (ResultSet resultSet = statement.executeQuery(query)) {
-                    if (resultSet.next()) {
-                        log.debug("[DB] Version: " + resultSet.getString(1));
-                    }
-                }
-
-            } catch (SQLException e) {
-                log.error("=== ОСНОВНАЯ ОШИБКА JDBC ===");
-                log.error("Состояние SQL (SQLState): " + e.getSQLState());
-                log.error("Код ошибки: " + e.getErrorCode());
-                log.error("Сообщение: " + e.getMessage());
-
-                Throwable cause = e.getCause();
-                if (cause != null) {
-                    log.error("=== ВНУТРЕННЯЯ ПРИЧИНА СЕТИ ===");
-                    log.error("Тип: " + cause.getClass().getName());
-                    log.error("Сообщение: " + cause.getMessage());
-                }
-
-                SQLException nextEx = e.getNextException();
-                while (nextEx != null) {
-                    log.error("=== СЛЕДУЮЩЕЕ ИСКЛЮЧЕНИЕ В ЦЕПОЧКЕ ===");
-                    log.error("Сообщение: " + nextEx.getMessage());
-                    nextEx = nextEx.getNextException();
-                }
-                log.error("[DB] Connection Failed!" + "\n\n" + e.getMessage());
-            }
-            return null;
-        }).subscribe(
-                result -> {},
-                error -> {
-                    SQLException exception = (SQLException) error;
-                    log.error("=== ОСНОВНАЯ ОШИБКА JDBC ===");
-                    log.error("Состояние SQL (SQLState): " + exception.getSQLState());
-                    log.error("Код ошибки: " + exception.getErrorCode());
-                    log.error("Сообщение: " + exception.getMessage());
-
-                    Throwable cause = exception.getCause();
-                    if (cause != null) {
-                        log.error("=== ВНУТРЕННЯЯ ПРИЧИНА СЕТИ ===");
-                        log.error("Тип: " + cause.getClass().getName());
-                        log.error("Сообщение: " + cause.getMessage());
-                    }
-
-                    SQLException nextEx = exception.getNextException();
-                    while (nextEx != null) {
-                        log.error("=== СЛЕДУЮЩЕЕ ИСКЛЮЧЕНИЕ В ЦЕПОЧКЕ ===");
-                        log.error("Сообщение: " + nextEx.getMessage());
-                        nextEx = nextEx.getNextException();
-                    }
-                    log.error("[DB] Connection Failed!" + "\n\n" + exception.getMessage());
-                }
-        );
+        try {
+            this.connection = DriverManager.getConnection(URL, USER, PASSWORD);
+            this.statement = connection.createStatement();
+            log.info("[DB] Successfully connected!");
+        } catch (SQLException e) {
+            log.error("[DB] Connection Failed!", e);
+        }
     }
 
     public void setData(String id, String nickname) throws SQLException {
-        statement.executeQuery("INSERT INTO public.members (user_id,nickname)\nVALUES(" + id + ", " + nickname.replace("'","") + ")");
+        String sql = "INSERT INTO public.members (user_id, nickname) VALUES (?, ?)";
+        try (PreparedStatement stmt = connection.prepareStatement(sql)) {
+            stmt.setString(1, id);
+            stmt.setString(2, nickname);
+            stmt.executeUpdate();
+        }
     }
 
     public void removeId(String id) throws SQLException {
@@ -103,5 +55,23 @@ public class Database {
             log.error("Ошибка при выполнении SELECT", e);
         }
         return false;
+    }
+
+    public String getUserNickname(String id) throws SQLException {
+        String sql = "SELECT nickname FROM public.members WHERE user_id = ?";
+
+        try (PreparedStatement stmt = connection.prepareStatement(sql)) {
+            stmt.setString(1, id);
+
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getString("nickname");
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Error executing SELECT query for user: " + id, e);
+            throw e;
+        }
+        return null;
     }
 }

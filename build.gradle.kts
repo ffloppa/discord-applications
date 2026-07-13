@@ -34,7 +34,11 @@ tasks.named<Jar>("shadowJar") {
         attributes("Main-Class" to "kz.ffloppa.Main")
     }
 }
-
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(21))
+    }
+}
 tasks.shadowJar {
     archiveClassifier.set("")
     mergeServiceFiles()
