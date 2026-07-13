@@ -10,9 +10,9 @@ import java.sql.*;
 public class Database {
     private static final Logger log = Loggers.getLogger(Database.class);
 
-    private static final String URL = System.getenv("postgresql_url");
-    private static final String USER = System.getenv("postgresql_user");
-    private static final String PASSWORD = System.getenv("postgresql_password");
+    private static final String URL = Main.dotenv.get("postgresql_url");
+    private static final String USER = Main.dotenv.get("postgresql_user");
+    private static final String PASSWORD = Main.dotenv.get("postgresql_password");
     private Statement statement;
     private Connection connection;
 

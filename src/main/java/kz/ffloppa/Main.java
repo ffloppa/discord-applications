@@ -16,17 +16,18 @@ import discord4j.core.object.entity.channel.MessageChannel;
 import discord4j.core.spec.EmbedCreateSpec;
 import discord4j.core.spec.InteractionPresentModalSpec;
 import discord4j.core.spec.MessageCreateSpec;
+import io.github.cdimascio.dotenv.Dotenv;
 import reactor.core.publisher.Mono;
 import reactor.util.Logger;
 import reactor.util.Loggers;
 
-import java.sql.SQLException;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class Main {
     private static final Logger log = Loggers.getLogger(Main.class);
+    public static final Dotenv dotenv = Dotenv.load();
     public final static Snowflake sendRequestChannelId = Snowflake.of(1525827353538854972L);
     public final static Snowflake adminRequestsChannelId = Snowflake.of(1525828328739700836L);
     public final static Snowflake debuggingChannelId = Snowflake.of(1525910734016479503L);
@@ -39,7 +40,7 @@ public class Main {
     public final static Button sendRequestButton = Button.primary("send-request", "Отправить запрос");
 
     static void main() {
-        GatewayDiscordClient client = DiscordClient.create(System.getenv("token"))
+        GatewayDiscordClient client = DiscordClient.create(dotenv.get("token"))
                 .gateway()
                 .withEventDispatcher(d -> d.on(ReadyEvent.class)
                         .doOnNext(readyEvent -> log.info("Ready: {}", readyEvent.getShardInfo())))
