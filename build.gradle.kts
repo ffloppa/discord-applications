@@ -35,6 +35,10 @@ tasks.named<Jar>("shadowJar") {
     }
 }
 
+tasks.shadowJar {
+    archiveClassifier.set("")
+    mergeServiceFiles()
+}
 tasks.test {
     useJUnitPlatform()
 }
