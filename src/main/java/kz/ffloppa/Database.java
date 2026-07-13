@@ -32,15 +32,28 @@ public class Database {
             stmt.setString(1, id);
             stmt.setString(2, nickname);
             stmt.executeUpdate();
+
+            if (!connection.getAutoCommit()) {
+                connection.commit();
+            }
         }
     }
 
     public void removeId(String id) throws SQLException {
-        statement.executeQuery("DELETE FROM public.members\nWHERE user_id = '" + id + "'");
+        String sql = "DELETE FROM public.members WHERE user_id = ?";
+
+        try (PreparedStatement stmt = connection.prepareStatement(sql)) {
+            stmt.setString(1, id);
+            stmt.executeUpdate();
+
+            if (!connection.getAutoCommit()) {
+                connection.commit();
+            }
+        }
     }
 
     public boolean isUserIdExists(String id) throws SQLException {
-        String sql = "SELECT EXISTS(SELECT 1 FROM public.members WHERE user_id = ?";
+        String sql = "SELECT EXISTS(SELECT 1 FROM public.members WHERE user_id = ?)";
         try (PreparedStatement stmt = connection.prepareStatement(sql)) {
             stmt.setString(1, id);
 

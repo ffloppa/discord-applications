@@ -10,21 +10,15 @@ import discord4j.core.object.component.ActionRow;
 import discord4j.core.object.component.SelectMenu;
 import discord4j.core.object.component.TextInput;
 import discord4j.core.object.entity.Guild;
-import discord4j.core.object.entity.Member;
 import discord4j.core.object.entity.channel.GuildMessageChannel;
 import discord4j.core.object.entity.channel.MessageChannel;
 import discord4j.core.spec.EmbedCreateSpec;
 import discord4j.core.spec.InteractionPresentModalSpec;
-import discord4j.core.spec.MessageCreateSpec;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
-import reactor.util.Logger;
-import reactor.util.Loggers;
 
 import java.sql.SQLException;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import static kz.ffloppa.Main.*;
 
@@ -39,6 +33,8 @@ public class FamilyUsersChecker {
             if (event.getCustomId().equals("menu-edit-nicks-users")) {
                 List<String> selectedValues = event.getValues();
                 String choice = selectedValues.getFirst();
+
+                if(isUserExists(client,choice)) return event.reply("этого я помню").withEphemeral(true);
 
                 TextInput nickInput = TextInput.small("nickname", "Кьо этость?")
                         .placeholder("Введите новый никнейм");
@@ -73,9 +69,9 @@ public class FamilyUsersChecker {
                                 return client.getGuildById(guildId)
                                         .flatMap(guild -> guild.getMemberById(Snowflake.of(finalUser)))
                                         .flatMap(member -> member.edit().withNicknameOrNull(finalNick))
-                                        .flatMap(a -> createDBRecordUser(client, finalUser, finalNick));
+                                        .then(Mono.defer(() -> createDBRecordUser(client, finalUser, finalNick)));
                             }
-                            return event.edit().withComponents(Collections.emptyList());
+                            return event.reply(" ").withEphemeral(true);
                         });
             }
             return Mono.empty();
@@ -83,49 +79,46 @@ public class FamilyUsersChecker {
 
         client.on(BanEvent.class, event -> Mono.fromCallable(() -> {
                     db.removeId(String.valueOf(event.getUser().getId()));
-                    return true;
+                    return client.getChannelById(debuggingChannelId)
+                            .ofType(GuildMessageChannel.class)
+                            .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
+                                    .title("удалил дон")
+                                    .description(event.getUser().getId().asString())
+                                    .build())
+                            );
                 })
-                .subscribeOn(Schedulers.boundedElastic())
-                .then(client.getChannelById(debuggingChannelId)
-                        .ofType(GuildMessageChannel.class)
-                        .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
-                                .title("удалил дон")
-                                .description(event.getUser().getId().asString())
-                                .build())
-                        ))
                 .onErrorResume(Exception.class, error -> {
                     log.error(String.valueOf(error));
                     return client.getChannelById(debuggingChannelId)
                             .ofType(GuildMessageChannel.class)
-                            .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
+                            .map(channel -> channel.createMessage(EmbedCreateSpec.builder()
                                     .title("ашибка дон")
                                     .description("иди проверь консоль дон")
                                     .build())
                             );
-                })).subscribe();
+                })
+        ).subscribe();
     }
 
-    public void callEditUsersMenu(GatewayDiscordClient client, ChatInputInteractionEvent event) {
-        client.getGuildById(guildId)
+    public Mono<Void> callEditUsersMenu(GatewayDiscordClient client, ChatInputInteractionEvent event) {
+        return client.getGuildById(guildId)
                 .flatMapMany(Guild::getMembers)
                 .flatMap(member -> {
                     log.debug("CHECKING CHECKING CHECKING для пользователя: {}", member.getDisplayName());
 
-                    return member.getRoles()
-                            .any(role -> role.getId().asString().equals("1525814865413931038"))
-                            .map(isBot -> {
-                                String userId = member.getId().asString();
-                                String displayName = member.getDisplayName();
 
-                                if (displayName.contains("_") && isUserExists(client, userId) && isBot) {
-                                    log.debug("checked");
-                                    users.put(userId, displayName);
-                                } else if(!isBot) {
-                                    log.debug("checked");
-                                    usersIdxToCheck.add(userId);
-                                }
-                                return member;
-                            });
+                    String userId = member.getId().asString();
+                    String displayName = member.getDisplayName();
+
+                    if (displayName.contains("_") && isUserExists(client, userId) && member.isBot()) {
+                        log.debug("checked");
+                        users.put(userId, displayName);
+                    } else if(!member.isBot()) {
+                        log.debug("checked");
+                        usersIdxToCheck.add(userId);
+                    }
+
+                    return Mono.empty();
                 })
                 .then()
                 .then(
@@ -138,37 +131,29 @@ public class FamilyUsersChecker {
                                                         optionsList.add(SelectMenu.DefaultValue.of(Snowflake.of(user), SelectMenu.DefaultValue.Type.USER));
                                                         return Mono.empty();
                                                     });
-                                            return event.reply()
+                                            return event.editReply()
                                                     .withEmbeds(EmbedCreateSpec.builder().title("Кто? (на размышление дается 2 секунды)").build())
-                                                    .withComponents(ActionRow.of(SelectMenu.ofUser("menu-edit-nicks-users", optionsList)))
-                                                    .withEphemeral(true);
+                                                    .withComponents(ActionRow.of(SelectMenu.ofUser("menu-edit-nicks-users", optionsList)));
                                         }
                                 )
                                 .then()
-                )
-                .subscribe(
-                        null,
-                        error -> log.error("Ошибка при обработке пользователей гильдии: ", error),
-                        () -> log.info("Проверка завершена! Сообщения успешно отправлены. Всего к проверке: {}", usersIdxToCheck.size())
                 );
     }
 
     public Mono<Void> createDBRecordUser(GatewayDiscordClient client, String user, String nick) {
-        return Mono.defer(() -> {
-            try {
-                db.setData(user, nick);
-                return Mono.empty();
-            } catch (SQLException e) {
-                log.error(e.getMessage());
-                return client.getChannelById(debuggingChannelId)
-                        .ofType(GuildMessageChannel.class)
-                        .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
-                                .title("ашибка дон")
-                                .description("иди проверь консоль дон")
-                                .build())
-                        );
-            }
-        }).then();
+        try {
+            db.setData(user, nick);
+            return Mono.empty();
+        } catch (SQLException e) {
+            log.error(e.getMessage());
+            return client.getChannelById(debuggingChannelId)
+                    .ofType(GuildMessageChannel.class)
+                    .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
+                            .title("ашибка дон")
+                            .description("иди проверь консоль дон")
+                            .build())
+                    ).then();
+        }
     }
 
     public boolean isUserExists(GatewayDiscordClient client, String user) {

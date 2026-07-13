@@ -103,18 +103,32 @@ public class Main {
         client.on(ChatInputInteractionEvent.class, event -> {
             if (event.getCommandName().equals("search")) {
                 Mono<User> targetUserMono = event.getOptionAsUser("user");
-                return targetUserMono.flatMap(user -> {
-                    String targetUserId = user.getId().asString();
+                AtomicBoolean isAdmin = new AtomicBoolean();
+                event.getUser().asMember(guildId)
+                        .flatMap(member -> member.getRoles().any(role -> role.getId().equals(adminRoleId)))
+                        .subscribe(isAdmin::set);
+                if(isAdmin.get())
+                    return targetUserMono.flatMap(user -> {
+                        String targetUserId = user.getId().asString();
 
-                    return event.reply(String.format("<@%s> - **%s**", targetUserId, usersChecker.getUserNameFromDB(targetUserId))).withEphemeral(true);
-                });
+                        return event.reply(String.format("<@%s> - **%s**", targetUserId, usersChecker.getUserNameFromDB(targetUserId))).withEphemeral(true);
+                    });
+                else
+                    return event.reply("No permission").withEphemeral(true);
             }
             if (event.getCommandName().equals("edit_nicknames")) {
-                Mono<User> targetUserMono = event.getOptionAsUser("user");
-                return targetUserMono.flatMap(user -> {
-                    usersChecker.callEditUsersMenu(client,event);
-                    return Mono.empty();
-                });
+                AtomicBoolean isAdmin = new AtomicBoolean();
+                event.getUser().asMember(guildId)
+                        .flatMap(member -> member.getRoles().any(role -> role.getId().equals(adminRoleId)))
+                        .subscribe(isAdmin::set);
+                if(isAdmin.get())
+                    return event.deferReply()
+                            .withEphemeral(true)
+                            .then(
+                                    usersChecker.callEditUsersMenu(client, event)
+                            );
+                else
+                    return event.reply("No permission").withEphemeral(true);
             }
 
             return Mono.empty();
@@ -165,6 +179,7 @@ public class Main {
 
                 String stringifiedUserId = event.getUser().getId().asString();
                 Button approveButton = Button.success(String.format("approve-request-%s-%s", stringifiedUserId, nick), "✅");
+                Button rapproveButton = Button.success(String.format("rapprove-request-%s-%s", stringifiedUserId, nick), "✅ и запомнить");
                 Button denyButton = Button.danger(String.format("deny-request-%s", stringifiedUserId), "❌");
 
                 final String finalNick = nick;
@@ -176,7 +191,7 @@ public class Main {
                                         .description(String.format("Пользователь: <@%s>\nНик: **%s**", stringifiedUserId, finalNick))
                                         .thumbnail(event.getUser().getAvatarUrl())
                                         .build())
-                                .addComponent(ActionRow.of(approveButton, denyButton))
+                                .addComponent(ActionRow.of(approveButton, rapproveButton, denyButton))
                                 .build()));
 
                 return event.reply("Заявка отправлена, рассмотрим за сутки")
@@ -201,11 +216,45 @@ public class Main {
                 );
             }
 
-            if (eventId.startsWith("approve-request-")) {
+            if (eventId.startsWith("rapprove-request-")) {
                 AtomicBoolean isAdmin = new AtomicBoolean();
                 event.getUser().asMember(guildId)
                       .flatMap(member -> member.getRoles().any(role -> role.getId().equals(adminRoleId)))
                       .subscribe(isAdmin::set);
+                if(isAdmin.get()) {
+                    String[] data = eventId.replace("rapprove-request-", "").split("-");
+
+                    String userId = data[0];
+                    String nickName = data[1];
+
+                    return client.getGuildById(guildId)
+                            .flatMap(guild -> guild.getMemberById(Snowflake.of(userId)))
+                            .flatMap(member -> member.edit().withNicknameOrNull(nickName))
+                            .flatMap(member -> member.addRole(verifiedRoleId))
+                            .then(Mono.defer(() -> usersChecker.createDBRecordUser(client, userId, nickName)))
+                            .then(event.deferEdit())
+                            .then(Mono.justOrEmpty(event.getInteraction().getMessage())
+                                    .flatMap(msg -> msg.edit().withComponents(Collections.emptyList()))
+                            )
+                            .then()
+                            .onErrorResume(err -> client.getChannelById(debuggingChannelId)
+                                    .ofType(GuildMessageChannel.class)
+                                    .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
+                                            .title("ашибка дон")
+                                            .description(err.getMessage() + "\n\n" + userId)
+                                            .build())
+                                    ).then()
+                            );
+                } else {
+                    return event.reply("No access").withEphemeral(true);
+                }
+            }
+
+            if (eventId.startsWith("approve-request-")) {
+                AtomicBoolean isAdmin = new AtomicBoolean();
+                event.getUser().asMember(guildId)
+                        .flatMap(member -> member.getRoles().any(role -> role.getId().equals(adminRoleId)))
+                        .subscribe(isAdmin::set);
                 if(isAdmin.get()) {
                     String[] data = eventId.replace("approve-request-", "").split("-");
 
@@ -214,9 +263,8 @@ public class Main {
 
                     return client.getGuildById(guildId)
                             .flatMap(guild -> guild.getMemberById(Snowflake.of(userId)))
-                            .flatMap(member -> member.edit().name(nickName))
+                            .flatMap(member -> member.edit().withNicknameOrNull(nickName))
                             .flatMap(member -> member.addRole(verifiedRoleId))
-                            .flatMap(a -> usersChecker.createDBRecordUser(client,userId,nickName))
                             .then(event.deferEdit())
                             .then(Mono.justOrEmpty(event.getInteraction().getMessage())
                                     .flatMap(msg -> msg.edit().withComponents(Collections.emptyList()))
