@@ -41,7 +41,7 @@ public class Database {
     }
 
     public void setData(String id, String nickname) throws SQLException {
-        statement.executeQuery("INSERT INTO public.members (user_id,nickname)\nVALUES(" + id + ", " + nickname.replace("SELECT", "") + ")");
+        statement.executeQuery("INSERT INTO public.members (user_id,nickname)\nVALUES(" + id + ", " + nickname.replace("'","") + ")");
     }
 
     public void removeId(String id) throws SQLException {
