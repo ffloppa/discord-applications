@@ -223,7 +223,7 @@ public class Main {
             }
 
             if(eventId.equals("prikol")) {
-                event.getUser().asMember(guildId)
+                return event.getUser().asMember(guildId)
                         .flatMap(member -> member.getRoles().any(role -> role.getId().equals(Snowflake.of(1526537777670389850L))))
                         .flatMap(isAlreadyHave -> {
                             if(!isAlreadyHave)
