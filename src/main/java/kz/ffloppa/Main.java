@@ -145,7 +145,7 @@ public class Main {
                                                         .title("Welcome to Los Pollos Hermanos Family")
                                                         .description("слышишь мультифрукт произведи махiнацию 👇")
                                                         .build())
-                                                .addComponent(ActionRow.of(sendRequestButton))
+                                                .addComponent(ActionRow.of(sendRequestButton,prikolButton))
                                                 .build());
                                     }
                                     return Mono.empty();
