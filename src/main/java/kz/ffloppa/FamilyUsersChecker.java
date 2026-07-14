@@ -51,28 +51,38 @@ public class FamilyUsersChecker {
 
         client.on(ModalSubmitInteractionEvent.class, event -> {
             if (event.getCustomId().startsWith("fill-user-nick-")) {
-                return event.getUser().asMember(guildId)
-                        .flatMap(member -> member.getRoles().any(role -> role.getId().equals(adminRoleId)))
-                        .flatMap(isAdmin -> {
-                            if (isAdmin) {
-                                String user = event.getCustomId().replace("fill-user-nick-", "");
-                                String nick = "???";
+                client.getGuildById(guildId)
+                        .flatMap(guild -> guild.getMemberById(Snowflake.of(event.getCustomId().replace("fill-user-nick-","")))
+                                .flatMap(member -> {
 
-                                for (TextInput input : event.getComponents(TextInput.class)) {
-                                    if (input.getCustomId().equals("nickname")) {
-                                        nick = input.getValue().orElse("???");
-                                    }
-                                }
+                                    if(!member.isBot())
+                                        return event.getUser().asMember(guildId)
+                                                .flatMap(member1 -> member.getRoles().any(role -> role.getId().equals(adminRoleId)))
+                                                .flatMap(isAdmin -> {
+                                                    if (isAdmin) {
+                                                        String user = event.getCustomId().replace("fill-user-nick-", "");
+                                                        String nick = "???";
 
-                                String finalUser = user;
-                                String finalNick = nick;
-                                return client.getGuildById(guildId)
-                                        .flatMap(guild -> guild.getMemberById(Snowflake.of(finalUser)))
-                                        .flatMap(member -> member.edit().withNicknameOrNull(finalNick))
-                                        .then(Mono.defer(() -> createDBRecordUser(client, finalUser, finalNick)));
-                            }
-                            return event.reply(" ").withEphemeral(true);
-                        });
+                                                        for (TextInput input : event.getComponents(TextInput.class)) {
+                                                            if (input.getCustomId().equals("nickname")) {
+                                                                nick = input.getValue().orElse("???");
+                                                            }
+                                                        }
+
+                                                        String finalUser = user;
+                                                        String finalNick = nick;
+                                                        return client.getGuildById(guildId)
+                                                                .flatMap(guild1 -> guild1.getMemberById(Snowflake.of(finalUser)))
+                                                                .flatMap(member1 -> member1.edit().withNicknameOrNull(finalNick))
+                                                                .then(Mono.defer(() -> createDBRecordUser(client, finalUser, finalNick)));
+                                                    }
+                                                    return event.reply(" ").withEphemeral(true);
+
+                                                });
+                                    else
+                                        return event.reply("не магъэу робота полный рост гибрид");
+                                })
+                        );
             }
             return Mono.empty();
         }).subscribe();
@@ -82,7 +92,7 @@ public class FamilyUsersChecker {
                     return client.getChannelById(debuggingChannelId)
                             .ofType(GuildMessageChannel.class)
                             .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
-                                    .title("удалил дон")
+                                    .title("шел плохой мозги ба")
                                     .description(event.getUser().getId().asString())
                                     .build())
                             );
@@ -93,7 +103,7 @@ public class FamilyUsersChecker {
                             .ofType(GuildMessageChannel.class)
                             .map(channel -> channel.createMessage(EmbedCreateSpec.builder()
                                     .title("ашибка дон")
-                                    .description("иди проверь консоль дон")
+                                    .description("иди проверь администрирование гибрида ба")
                                     .build())
                             );
                 })
@@ -132,7 +142,7 @@ public class FamilyUsersChecker {
                                                         return Mono.empty();
                                                     });
                                             return event.editReply()
-                                                    .withEmbeds(EmbedCreateSpec.builder().title("Кто? (на размышление дается 2 секунды)").build())
+                                                    .withEmbeds(EmbedCreateSpec.builder().title("кьо это такие ба?").build())
                                                     .withComponents(ActionRow.of(SelectMenu.ofUser("menu-edit-nicks-users", optionsList)));
                                         }
                                 )
@@ -150,7 +160,7 @@ public class FamilyUsersChecker {
                     .ofType(GuildMessageChannel.class)
                     .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
                             .title("ашибка дон")
-                            .description("иди проверь консоль дон")
+                            .description("иди проверь администрирование гибрида ба")
                             .build())
                     ).then();
         }

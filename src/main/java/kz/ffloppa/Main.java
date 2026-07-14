@@ -3,16 +3,15 @@ package kz.ffloppa;
 import discord4j.common.util.Snowflake;
 import discord4j.core.DiscordClient;
 import discord4j.core.GatewayDiscordClient;
-import discord4j.core.event.domain.interaction.ApplicationCommandInteractionEvent;
 import discord4j.core.event.domain.interaction.ButtonInteractionEvent;
 import discord4j.core.event.domain.interaction.ChatInputInteractionEvent;
 import discord4j.core.event.domain.interaction.ModalSubmitInteractionEvent;
+import discord4j.core.event.domain.lifecycle.DisconnectEvent;
 import discord4j.core.event.domain.lifecycle.ReadyEvent;
-import discord4j.core.object.command.ApplicationCommandInteractionOption;
-import discord4j.core.object.command.ApplicationCommandInteractionOptionValue;
 import discord4j.core.object.command.ApplicationCommandOption;
 import discord4j.core.object.component.ActionRow;
 import discord4j.core.object.component.Button;
+import discord4j.core.object.component.TextDisplay;
 import discord4j.core.object.component.TextInput;
 import discord4j.core.object.entity.Message;
 import discord4j.core.object.entity.User;
@@ -41,13 +40,15 @@ public class Main {
     public final static Snowflake sendRequestChannelId = Snowflake.of(1525827353538854972L);
     public final static Snowflake adminRequestsChannelId = Snowflake.of(1525828328739700836L);
     public final static Snowflake debuggingChannelId = Snowflake.of(1525910734016479503L);
+    public final static Snowflake globalMaintenanceChannelId = Snowflake.of(1526300681479389184L);
     public final static Snowflake managingChannelId = Snowflake.of(1526101639239438418L);
 
     public final static Snowflake guildId = Snowflake.of(1525736606315708476L);
 
     public final static Snowflake adminRoleId = Snowflake.of(1525737204163543191L);
     public final static Snowflake verifiedRoleId = Snowflake.of(1525825482556309585L);
-    public final static Button sendRequestButton = Button.primary("send-request", "Отправить запрос");
+    public final static Button sendRequestButton = Button.primary("send-request", "заделать заявительный запрос");
+    public final static Button prikolButton = Button.primary("prikol", "Я гражданин Чеченской Республики");
 
     public static void main(String[] args) {
         GatewayDiscordClient client = DiscordClient.create(dotenv.get("token"))
@@ -59,27 +60,29 @@ public class Main {
                         Intent.MESSAGE_CONTENT
                 ))
                 .withEventDispatcher(d -> d.on(ReadyEvent.class)
-                        .doOnNext(readyEvent -> {
+                        .map(readyEvent -> {
                             log.info("Ready: {}", readyEvent.getShardInfo());
 
                             long applicationId = readyEvent.getClient().getRestClient().getApplicationId().block();
 
-                            readyEvent.getClient().getChannelById(debuggingChannelId).ofType(GuildMessageChannel.class).flatMap(channel -> channel.createMessage("здарова дон"));
-
-                            var searchCommand = ApplicationCommandRequest.builder()
-                                    .name("search")
-                                    .description("Понятно из названия")
-                                    .addOption(ApplicationCommandOptionData.builder().description("Сам пользователь").name("user").type(ApplicationCommandOption.Type.USER.getValue()).build())
+                            var whoCommand = ApplicationCommandRequest.builder()
+                                    .name("who")
+                                    .description("понимать ба?")
+                                    .addOption(ApplicationCommandOptionData.builder().description("понимать ба?").name("user").type(ApplicationCommandOption.Type.USER.getValue()).build())
                                     .build();
 
-                            readyEvent.getClient().getRestClient().getApplicationService().createGuildApplicationCommand(applicationId, guildId.asLong(),searchCommand).subscribe();
+                            readyEvent.getClient().getRestClient().getApplicationService().createGuildApplicationCommand(applicationId, guildId.asLong(),whoCommand).subscribe();
 
                             var editCommand = ApplicationCommandRequest.builder()
                                     .name("edit_nicknames")
-                                    .description("Понятно из названия")
+                                    .description("понимать ба?")
                                     .build();
 
                             readyEvent.getClient().getRestClient().getApplicationService().createGuildApplicationCommand(applicationId, guildId.asLong(),editCommand).subscribe();
+                            return readyEvent.getClient()
+                                    .getChannelById(globalMaintenanceChannelId)
+                                    .ofType(GuildMessageChannel.class)
+                                    .flatMap(channel -> channel.createMessage("привет ба"));
                         }))
                 .login()
                 .doOnError(e -> log.error("Failed to authenticate with Discord", e))
@@ -87,48 +90,40 @@ public class Main {
                 .block();
 
         assert client != null;
-        client.onDisconnect()
-                .flatMap(a -> client.getChannelById(debuggingChannelId)
-                        .ofType(GuildMessageChannel.class)
-                        .flatMap(channel -> channel.createMessage("все дон я пошел"))
-                )
-                .subscribe(
-                        null,
-                        err -> log.error("Не удалось отправить прощальное сообщение", err),
-                        () -> log.info("Бот успешно отключился от шлюза.")
-                );
-
+        client.on(DisconnectEvent.class, event -> client.getChannelById(globalMaintenanceChannelId)
+                .ofType(GuildMessageChannel.class)
+                .flatMap(channel -> channel.createMessage("мнъе поьрэ засунуть ба"))).subscribe();
         FamilyUsersChecker usersChecker = new FamilyUsersChecker(client);
 
         client.on(ChatInputInteractionEvent.class, event -> {
-            if (event.getCommandName().equals("search")) {
+            if (event.getCommandName().equals("who")) {
                 Mono<User> targetUserMono = event.getOptionAsUser("user");
-                AtomicBoolean isAdmin = new AtomicBoolean();
-                event.getUser().asMember(guildId)
+                return event.getUser().asMember(guildId)
                         .flatMap(member -> member.getRoles().any(role -> role.getId().equals(adminRoleId)))
-                        .subscribe(isAdmin::set);
-                if(isAdmin.get())
-                    return targetUserMono.flatMap(user -> {
-                        String targetUserId = user.getId().asString();
+                        .flatMap(isAdmin -> {
+                            if (isAdmin)
+                                return targetUserMono.flatMap(user -> {
+                                    String targetUserId = user.getId().asString();
 
-                        return event.reply(String.format("<@%s> - **%s**", targetUserId, usersChecker.getUserNameFromDB(targetUserId))).withEphemeral(true);
-                    });
-                else
-                    return event.reply("No permission").withEphemeral(true);
+                                    return event.reply(String.format("<@%s> - **%s**", targetUserId, usersChecker.getUserNameFromDB(targetUserId))).withEphemeral(true);
+                                });
+                            else
+                                return event.reply("No permission").withEphemeral(true);
+                        });
             }
             if (event.getCommandName().equals("edit_nicknames")) {
-                AtomicBoolean isAdmin = new AtomicBoolean();
-                event.getUser().asMember(guildId)
+                return event.getUser().asMember(guildId)
                         .flatMap(member -> member.getRoles().any(role -> role.getId().equals(adminRoleId)))
-                        .subscribe(isAdmin::set);
-                if(isAdmin.get())
-                    return event.deferReply()
-                            .withEphemeral(true)
-                            .then(
-                                    usersChecker.callEditUsersMenu(client, event)
-                            );
-                else
-                    return event.reply("No permission").withEphemeral(true);
+                        .flatMap(isAdmin -> {
+                            if (isAdmin)
+                                return event.deferReply()
+                                        .withEphemeral(true)
+                                        .then(
+                                                usersChecker.callEditUsersMenu(client, event)
+                                        );
+                            else
+                                return event.reply("No permission").withEphemeral(true);
+                        });
             }
 
             return Mono.empty();
@@ -141,14 +136,14 @@ public class Main {
                                 .take(1)
                                 .next()
                                 .map(Message::getEmbeds)
-                                .map(embeds -> !embeds.isEmpty() && embeds.get(0).getTitle().orElse("").contains("Los Pollos Hermanos"))
+                                .map(embeds -> !embeds.isEmpty() && embeds.get(1).getTitle().orElse("").contains("слышишь мультифрукт произведи махiнацию"))
                                 .defaultIfEmpty(false)
                                 .flatMap(hasWelcomeMessage -> {
                                     if (!hasWelcomeMessage) {
                                         return messageChannel.createMessage(MessageCreateSpec.builder()
                                                 .addEmbed(EmbedCreateSpec.builder()
                                                         .title("Welcome to Los Pollos Hermanos Family")
-                                                        .description("Чтобы увидеть все каналы, подай заявку, жми 👇")
+                                                        .description("слышишь мультифрукт произведи махiнацию 👇")
                                                         .build())
                                                 .addComponent(ActionRow.of(sendRequestButton))
                                                 .build());
@@ -168,6 +163,17 @@ public class Main {
                 );
 
         client.on(ModalSubmitInteractionEvent.class, event -> {
+            if (event.getCustomId().equals("prikol-2")) {
+                return event.reply("ты ба, в зәпъэчкался")
+                        .withEphemeral(true)
+                        .flatMap(mono -> {
+                            event.getUser().asMember(guildId).flatMap(member -> member.addRole(Snowflake.of(1526537777670389850L)));
+                            return client.getChannelById(debuggingChannelId)
+                                            .ofType(GuildMessageChannel.class)
+                                            .flatMap(channel -> channel.createMessage("нъовый грәждьанин <@%s>" + event.getUser().getId().asString()));
+                                }
+                        );
+            }
             if (event.getCustomId().equals("fill-request")) {
 
                 String nick = "???";
@@ -179,7 +185,7 @@ public class Main {
 
                 String stringifiedUserId = event.getUser().getId().asString();
                 Button approveButton = Button.success(String.format("approve-request-%s-%s", stringifiedUserId, nick), "✅");
-                Button rapproveButton = Button.success(String.format("rapprove-request-%s-%s", stringifiedUserId, nick), "✅ и запомнить");
+                Button rapproveButton = Button.success(String.format("rapprove-request-%s-%s", stringifiedUserId, nick), "✅ и провэстi мозгъовой әктивность");
                 Button denyButton = Button.danger(String.format("deny-request-%s", stringifiedUserId), "❌");
 
                 final String finalNick = nick;
@@ -187,21 +193,21 @@ public class Main {
                         .ofType(GuildMessageChannel.class)
                         .flatMap(channel -> channel.createMessage(MessageCreateSpec.builder()
                                 .addEmbed(EmbedCreateSpec.builder()
-                                        .title("Заявка")
-                                        .description(String.format("Пользователь: <@%s>\nНик: **%s**", stringifiedUserId, finalNick))
+                                        .title("заявительный запрос")
+                                        .description(String.format("мультифрукт: <@%s>\nраспрострәнятся: **%s**", stringifiedUserId, finalNick))
                                         .thumbnail(event.getUser().getAvatarUrl())
                                         .build())
                                 .addComponent(ActionRow.of(approveButton, rapproveButton, denyButton))
                                 .build()));
 
-                return event.reply("Заявка отправлена, рассмотрим за сутки")
+                return event.reply("мультифрукт жду, согләсовәния зәявительного зәпроса")
                         .withEphemeral(true)
                         .then(sendToAdmins);
             }
             return Mono.empty();
         }).subscribe();
 
-        TextInput nickInput = TextInput.small("nickname", "Кто вы?")
+        TextInput nickInput = TextInput.small("nickname", "как называтькаться ба?")
                 .placeholder("Знакомьтесь с клавиатурой Gboard! Здесь будет сохраняться текст, который вы копируете.");
 
         client.on(ButtonInteractionEvent.class, event -> {
@@ -216,100 +222,120 @@ public class Main {
                 );
             }
 
-            if (eventId.startsWith("rapprove-request-")) {
-                AtomicBoolean isAdmin = new AtomicBoolean();
+            if(eventId.equals("prikol")) {
                 event.getUser().asMember(guildId)
+                        .flatMap(member -> member.getRoles().any(role -> role.getId().equals(Snowflake.of(1526537777670389850L))))
+                        .flatMap(isAlreadyHave -> {
+                            if(!isAlreadyHave)
+                                return event.presentModal(InteractionPresentModalSpec.builder()
+                                        .title(" ")
+                                        .customId("prikol-2")
+                                        .addComponent(TextDisplay.of("Мои поздравльяния, ты проьпустил зәявьительный пункът, чтобә прьойти вопросәительный знъак нәпиши \"бурмалда\" "))
+                                        .build());
+                            else
+                                return event.reply("ты нә приколье ба?").withEphemeral(true);
+                            }
+                        );
+            }
+
+            if (eventId.startsWith("rapprove-request-")) {
+                return event.getUser().asMember(guildId)
                       .flatMap(member -> member.getRoles().any(role -> role.getId().equals(adminRoleId)))
-                      .subscribe(isAdmin::set);
-                if(isAdmin.get()) {
-                    String[] data = eventId.replace("rapprove-request-", "").split("-");
+                      .flatMap(isAdmin -> {
+                          if(isAdmin) {
+                              String[] data = eventId.replace("rapprove-request-", "").split("-");
+                              String userId = data[0];
+                              String nickName = data[1];
 
-                    String userId = data[0];
-                    String nickName = data[1];
-
-                    return client.getGuildById(guildId)
-                            .flatMap(guild -> guild.getMemberById(Snowflake.of(userId)))
-                            .flatMap(member -> member.edit().withNicknameOrNull(nickName))
-                            .flatMap(member -> member.addRole(verifiedRoleId))
-                            .then(Mono.defer(() -> usersChecker.createDBRecordUser(client, userId, nickName)))
-                            .then(event.deferEdit())
-                            .then(Mono.justOrEmpty(event.getInteraction().getMessage())
-                                    .flatMap(msg -> msg.edit().withComponents(Collections.emptyList()))
-                            )
-                            .then()
-                            .onErrorResume(err -> client.getChannelById(debuggingChannelId)
-                                    .ofType(GuildMessageChannel.class)
-                                    .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
-                                            .title("ашибка дон")
-                                            .description(err.getMessage() + "\n\n" + userId)
-                                            .build())
-                                    ).then()
-                            );
-                } else {
-                    return event.reply("No access").withEphemeral(true);
-                }
+                              return event.deferEdit()
+                                      .then(
+                                              client.getGuildById(guildId)
+                                                      .flatMap(guild -> guild.getMemberById(Snowflake.of(userId)))
+                                                      .flatMap(member -> member.edit().withNicknameOrNull(nickName))
+                                                      .flatMap(member -> member.addRole(verifiedRoleId))
+                                                      .then(Mono.defer(() -> usersChecker.createDBRecordUser(client, userId, nickName)))
+                                      )
+                                      .then(Mono.justOrEmpty(event.getInteraction().getMessage())
+                                              .flatMap(msg -> msg.edit().withComponents(Collections.emptyList()))
+                                      )
+                                      .then()
+                                      .onErrorResume(err -> client.getChannelById(debuggingChannelId)
+                                            .ofType(GuildMessageChannel.class)
+                                            .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
+                                                    .title("ашибка дон")
+                                                    .description(err.getMessage() + "\n\n" + userId)
+                                                    .build())
+                                            ).then()
+                                      );
+                          } else {
+                              return event.reply("No access").withEphemeral(true);
+                          }
+                      });
             }
 
             if (eventId.startsWith("approve-request-")) {
-                AtomicBoolean isAdmin = new AtomicBoolean();
-                event.getUser().asMember(guildId)
+                return event.getUser().asMember(guildId)
                         .flatMap(member -> member.getRoles().any(role -> role.getId().equals(adminRoleId)))
-                        .subscribe(isAdmin::set);
-                if(isAdmin.get()) {
-                    String[] data = eventId.replace("approve-request-", "").split("-");
+                        .flatMap(isAdmin -> {
+                            if(isAdmin) {
+                                String[] data = eventId.replace("approve-request-", "").split("-");
 
-                    String userId = data[0];
-                    String nickName = data[1];
+                                String userId = data[0];
+                                String nickName = data[1];
 
-                    return client.getGuildById(guildId)
-                            .flatMap(guild -> guild.getMemberById(Snowflake.of(userId)))
-                            .flatMap(member -> member.edit().withNicknameOrNull(nickName))
-                            .flatMap(member -> member.addRole(verifiedRoleId))
-                            .then(event.deferEdit())
-                            .then(Mono.justOrEmpty(event.getInteraction().getMessage())
-                                    .flatMap(msg -> msg.edit().withComponents(Collections.emptyList()))
-                            )
-                            .then()
-                            .onErrorResume(err -> client.getChannelById(debuggingChannelId)
-                                    .ofType(GuildMessageChannel.class)
-                                    .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
-                                            .title("ашибка дон")
-                                            .description(err.getMessage() + "\n\n" + userId)
-                                            .build())
-                                    ).then()
-                            );
-                } else {
-                    return event.reply("No access").withEphemeral(true);
-                }
+                                return event.deferEdit()
+                                        .then(
+                                                client.getGuildById(guildId)
+                                                        .flatMap(guild -> guild.getMemberById(Snowflake.of(userId)))
+                                                        .flatMap(member -> member.edit().withNicknameOrNull(nickName))
+                                                        .flatMap(member -> member.addRole(verifiedRoleId))
+                                                        .then(Mono.defer(() -> usersChecker.createDBRecordUser(client, userId, nickName)))
+                                        )
+                                        .then(Mono.justOrEmpty(event.getInteraction().getMessage())
+                                                .flatMap(msg -> msg.edit().withComponents(Collections.emptyList()))
+                                        )
+                                        .then()
+                                        .onErrorResume(err -> client.getChannelById(debuggingChannelId)
+                                                .ofType(GuildMessageChannel.class)
+                                                .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
+                                                        .title("ашибка дон")
+                                                        .description(err.getMessage() + "\n\n" + userId)
+                                                        .build())
+                                                ).then()
+                                        );
+                            } else {
+                                return event.reply("No access").withEphemeral(true);
+                            }
+                        });
             }
 
             if (eventId.startsWith("deny-request-")) {
-                AtomicBoolean isAdmin = new AtomicBoolean();
-                event.getUser().asMember(guildId)
+                return event.getUser().asMember(guildId)
                         .flatMap(member -> member.getRoles().any(role -> role.getId().equals(adminRoleId)))
-                        .subscribe(isAdmin::set);
-                if(isAdmin.get()) {
-                    String userId = eventId.replace("deny-request-", "");
+                        .flatMap(isAdmin -> {
+                            if (isAdmin) {
+                                String userId = eventId.replace("deny-request-", "");
 
-                    return client.getUserById(Snowflake.of(userId))
-                            .flatMap(User::getPrivateChannel)
-                            .flatMap(channel -> channel.createMessage("заявька атклонена дон"))
-                            .then(event.deferEdit())
-                            .then(Mono.justOrEmpty(event.getInteraction().getMessage())
-                                    .flatMap(msg -> msg.edit().withComponents(Collections.emptyList()))
-                            )
-                            .then()
-                            .onErrorResume(err -> client.getChannelById(debuggingChannelId)
-                                    .ofType(GuildMessageChannel.class)
-                                    .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
-                                            .title("ашибка дон")
-                                            .description(err.getMessage() + "\n\n" + userId)
-                                            .build())
-                                    ).then()
-                            );
-                } else {
-                    return event.reply("No access").withEphemeral(true);
-                }
+                                return client.getUserById(Snowflake.of(userId))
+                                        .flatMap(User::getPrivateChannel)
+                                        .flatMap(channel -> channel.createMessage("замешкалась админ и сказал не подходи"))
+                                        .then(event.deferEdit())
+                                        .then(Mono.justOrEmpty(event.getInteraction().getMessage())
+                                                .flatMap(msg -> msg.edit().withComponents(Collections.emptyList()))
+                                        )
+                                        .then()
+                                        .onErrorResume(err -> client.getChannelById(debuggingChannelId)
+                                                .ofType(GuildMessageChannel.class)
+                                                .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
+                                                        .title("ашибка дон")
+                                                        .description(err.getMessage() + "\n\n" + userId)
+                                                        .build())
+                                                ).then()
+                                        );
+                            } else {
+                                return event.reply("No access").withEphemeral(true);
+                            }
+                        });
             }
 
             return Mono.empty();
