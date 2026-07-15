@@ -57,7 +57,8 @@ public class Main {
                         Intent.GUILDS,
                         Intent.GUILD_MEMBERS,
                         Intent.GUILD_MESSAGES,
-                        Intent.MESSAGE_CONTENT
+                        Intent.MESSAGE_CONTENT,
+                        Intent.GUILD_MODERATION
                 ))
                 .withEventDispatcher(d -> d.on(ReadyEvent.class)
                         .flatMap(readyEvent -> {
