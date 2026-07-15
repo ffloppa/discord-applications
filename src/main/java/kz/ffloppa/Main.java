@@ -60,7 +60,7 @@ public class Main {
                         Intent.MESSAGE_CONTENT
                 ))
                 .withEventDispatcher(d -> d.on(ReadyEvent.class)
-                        .map(readyEvent -> {
+                        .flatMap(readyEvent -> {
                             log.info("Ready: {}", readyEvent.getShardInfo());
 
                             long applicationId = readyEvent.getClient().getRestClient().getApplicationId().block();
@@ -71,14 +71,15 @@ public class Main {
                                     .addOption(ApplicationCommandOptionData.builder().description("понимать ба?").name("user").type(ApplicationCommandOption.Type.USER.getValue()).build())
                                     .build();
 
-                            readyEvent.getClient().getRestClient().getApplicationService().createGuildApplicationCommand(applicationId, guildId.asLong(),whoCommand).subscribe();
+                            readyEvent.getClient().getRestClient().getApplicationService().createGuildApplicationCommand(applicationId, guildId.asLong(), whoCommand).subscribe();
 
                             var editCommand = ApplicationCommandRequest.builder()
                                     .name("edit_nicknames")
                                     .description("понимать ба?")
                                     .build();
 
-                            readyEvent.getClient().getRestClient().getApplicationService().createGuildApplicationCommand(applicationId, guildId.asLong(),editCommand).subscribe();
+                            readyEvent.getClient().getRestClient().getApplicationService().createGuildApplicationCommand(applicationId, guildId.asLong(), editCommand).subscribe();
+
                             return readyEvent.getClient()
                                     .getChannelById(globalMaintenanceChannelId)
                                     .ofType(GuildMessageChannel.class)
@@ -90,9 +91,16 @@ public class Main {
                 .block();
 
         assert client != null;
-        client.on(DisconnectEvent.class, event -> client.getChannelById(globalMaintenanceChannelId)
-                .ofType(GuildMessageChannel.class)
-                .flatMap(channel -> channel.createMessage("мнъе поьрэ засунуть ба"))).subscribe();
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                client.getChannelById(globalMaintenanceChannelId)
+                        .ofType(GuildMessageChannel.class)
+                        .flatMap(channel -> channel.createMessage("мнъе поьрэ засунуть ба"))
+                        .block();
+            } catch (Exception e) {
+                log.error("Не удалось отправить сообщение перед выходом", e);
+            }
+        }));
         FamilyUsersChecker usersChecker = new FamilyUsersChecker(client);
 
         client.on(ChatInputInteractionEvent.class, event -> {
