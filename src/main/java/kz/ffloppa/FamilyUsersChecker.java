@@ -34,7 +34,7 @@ public class FamilyUsersChecker {
                 List<String> selectedValues = event.getValues();
                 String choice = selectedValues.getFirst();
 
-                if(isUserExists(client,choice)) return event.reply("этого я помню").withEphemeral(true);
+                if (isUserExists(client, choice)) return event.reply("этого я помню").withEphemeral(true);
 
                 TextInput nickInput = TextInput.small("nickname", "Кьо этость?")
                         .placeholder("Введите новый никнейм");
@@ -52,10 +52,10 @@ public class FamilyUsersChecker {
         client.on(ModalSubmitInteractionEvent.class, event -> {
             if (event.getCustomId().startsWith("fill-user-nick-")) {
                 client.getGuildById(guildId)
-                        .flatMap(guild -> guild.getMemberById(Snowflake.of(event.getCustomId().replace("fill-user-nick-","")))
+                        .flatMap(guild -> guild.getMemberById(Snowflake.of(event.getCustomId().replace("fill-user-nick-", "")))
                                 .flatMap(member -> {
 
-                                    if(!member.isBot())
+                                    if (!member.isBot())
                                         return event.getUser().asMember(guildId)
                                                 .flatMap(member1 -> member.getRoles().any(role -> role.getId().equals(adminRoleId)))
                                                 .flatMap(isAdmin -> {
@@ -87,30 +87,33 @@ public class FamilyUsersChecker {
             return Mono.empty();
         }).subscribe();
 
-        client.on(BanEvent.class, event -> Mono.fromCallable(() -> {
-                    if(isUserExists(client,event.getUser().getId().asString())) {
-                        db.removeId(event.getUser().getId().asString());
-                        return client.getChannelById(debuggingChannelId)
-                                .ofType(GuildMessageChannel.class)
-                                .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
-                                        .title("шел плохой мозги ба")
-                                        .description(event.getUser().getId().asString())
-                                        .build())
-                                );
-                    }
-                            return null;
-                        })
-                .onErrorResume(Exception.class, error -> {
-                    log.error(String.valueOf(error));
-                    return client.getChannelById(debuggingChannelId)
-                            .ofType(GuildMessageChannel.class)
-                            .map(channel -> channel.createMessage(EmbedCreateSpec.builder()
-                                    .title("ашибка дон")
-                                    .description("иди проверь администрирование гибрида ба")
-                                    .build())
-                            );
-                })
-        ).subscribe();
+        client.on(BanEvent.class, event -> {
+            String userId = event.getUser().getId().asString();
+
+            return Mono.fromCallable(() -> isUserExists(client, userId))
+                    .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
+                    .flatMap(exists -> {
+                        if (exists) {
+                            return Mono.fromRunnable(() -> {
+                                        try {
+                                            db.removeId(userId);
+                                        } catch (SQLException e) {
+                                            throw new RuntimeException(e);
+                                        }
+                                    })
+                                    .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
+                                    .then(
+                                            client.getChannelById(debuggingChannelId)
+                                                    .ofType(GuildMessageChannel.class)
+                                                    .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
+                                                            .title("шел плохой мозги ба")
+                                                            .description(userId)
+                                                            .build()))
+                                    );
+                        }
+                        return Mono.empty();
+                    });
+        }).subscribe();
     }
 
     public Mono<Void> callEditUsersMenu(GatewayDiscordClient client, ChatInputInteractionEvent event) {
