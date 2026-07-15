@@ -166,12 +166,16 @@ public class Main {
             if (event.getCustomId().equals("prikol-2")) {
                 return event.reply("ты ба, в зәпъэчкался")
                         .withEphemeral(true)
-                        .flatMap(mono -> {
-                            event.getUser().asMember(guildId).flatMap(member -> member.addRole(Snowflake.of(1526537777670389850L)));
-                            return client.getChannelById(debuggingChannelId)
-                                            .ofType(GuildMessageChannel.class)
-                                            .flatMap(channel -> channel.createMessage("нъовый грәждьанин <@%s>" + event.getUser().getId().asString()));
-                                }
+                        .flatMap(mono ->
+                            event.getUser().asMember(guildId)
+                                    .flatMap(member -> member.addRole(Snowflake.of(1526537777670389850L)))
+                                    .then(
+                                            client.getChannelById(debuggingChannelId)
+                                                    .ofType(GuildMessageChannel.class)
+                                                    .flatMap(channel -> channel.createMessage(
+                                                            String.format("нъовый грәждьанин <@%s>", event.getUser().getId().asString())
+                                                    ))
+                                    )
                         );
             }
             if (event.getCustomId().equals("fill-request")) {

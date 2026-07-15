@@ -88,15 +88,18 @@ public class FamilyUsersChecker {
         }).subscribe();
 
         client.on(BanEvent.class, event -> Mono.fromCallable(() -> {
-                    db.removeId(String.valueOf(event.getUser().getId()));
-                    return client.getChannelById(debuggingChannelId)
-                            .ofType(GuildMessageChannel.class)
-                            .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
-                                    .title("шел плохой мозги ба")
-                                    .description(event.getUser().getId().asString())
-                                    .build())
-                            );
-                })
+                    if(isUserExists(client,event.getUser().getId().asString())) {
+                        db.removeId(event.getUser().getId().asString());
+                        return client.getChannelById(debuggingChannelId)
+                                .ofType(GuildMessageChannel.class)
+                                .flatMap(channel -> channel.createMessage(EmbedCreateSpec.builder()
+                                        .title("шел плохой мозги ба")
+                                        .description(event.getUser().getId().asString())
+                                        .build())
+                                );
+                    }
+                            return null;
+                        })
                 .onErrorResume(Exception.class, error -> {
                     log.error(String.valueOf(error));
                     return client.getChannelById(debuggingChannelId)
